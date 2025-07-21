@@ -68,4 +68,14 @@ export class JobQueueController {
   async getJobResult(@Param('jobId') jobId: string) {
     return this.agentExecutorService.getJobExecutionResult(jobId);
   }
+
+  @Post('complete/:jobId/:agentId')
+  @ApiOperation({ summary: '选择最终agent并完成Job' })
+  @ApiResponse({ status: 200, description: 'Job完成' })
+  async completeJobWithAgent(
+    @Param('jobId') jobId: string, 
+    @Param('agentId') agentId: string
+  ) {
+    return this.agentExecutorService.completeJobWithSelectedAgent(jobId, agentId);
+  }
 }

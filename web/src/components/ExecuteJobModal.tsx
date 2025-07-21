@@ -40,10 +40,13 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
   matchRecord,
   onExecuteComplete
 }) => {
-  const [executing, setExecuting] = useState<string | null>(null); // 记录正在执行的agent id
-  const [executionResult, setExecutionResult] = useState<any>(null);
+  const [executingAgents, setExecutingAgents] = useState<Set<string>>(new Set()); // 记录正在执行的agent ids
+  const [retryingAgents, setRetryingAgents] = useState<Map<string, number>>(new Map()); // 记录正在重试的agent和重试次数
+  const [agentResults, setAgentResults] = useState<Map<string, any>>(new Map()); // 存储每个agent的执行结果
   const [loadingResult, setLoadingResult] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
+  const [selectedWinner, setSelectedWinner] = useState<string | null>(null); // 用户选择的获胜agent
+  const [autoExecutionStarted, setAutoExecutionStarted] = useState(false); // 是否已开始自动执行
   const [agents, setAgents] = useState<Agent[]>([]);
   const [jobMatchDetails, setJobMatchDetails] = useState<any>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -61,14 +64,26 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
         // 获取匹配详情（包含多个agents）
         const matchDetails = await queueApi.getMatchDetails(job.id);
         setJobMatchDetails(matchDetails);
-        setAgents(matchDetails.agents || [matchDetails.agent].filter(Boolean));
+        const matchedAgents = matchDetails.agents || [matchDetails.agent].filter(Boolean);
+        setAgents(matchedAgents);
         
         // 如果job已完成，获取执行结果
         if (job.status === 'Completed' || job.status === 'Failed') {
           const result = await queueApi.getJobResult(job.id);
           if (result.hasResult) {
-            setExecutionResult(result);
+            // 将已有的执行结果存储到对应的agent中
+            // 注意：这里假设只有一个agent完成了执行
+            if (matchedAgents.length > 0) {
+              const resultMap = new Map();
+              resultMap.set(matchedAgents[0].id, result);
+              setAgentResults(resultMap);
+            }
           }
+        } else if ((job.status === 'Matched' || job.status === 'In Progress') && !autoExecutionStarted) {
+          // 如果job状态是Matched或In Progress且还未开始自动执行，则开始自动执行
+          // 这样即使用户刷新页面，也能继续执行尚未完成的agents
+          setAutoExecutionStarted(true);
+          executeAllAgents(matchedAgents);
         }
       } catch (error) {
         console.error('获取job详情失败:', error);
@@ -82,16 +97,36 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
     };
 
     fetchJobDetails();
-  }, [visible, job, agent]);
+  }, [visible, job, agent, autoExecutionStarted]);
 
-  const handleExecute = async (selectedAgent: Agent) => {
-    if (!job || !selectedAgent) return;
+  // 自动执行所有agents
+  const executeAllAgents = async (agentsToExecute: Agent[]) => {
+    if (!job || !agentsToExecute.length) return;
+    
+    console.log('开始自动执行所有agents:', agentsToExecute.map(a => a.id));
+    
+    // 并行执行所有agents
+    const executionPromises = agentsToExecute.map(agent => executeAgent(agent));
     
     try {
-      setExecuting(selectedAgent.id);
+      await Promise.allSettled(executionPromises);
+      console.log('所有agents执行完成');
+    } catch (error) {
+      console.error('自动执行过程中出现错误:', error);
+    }
+  };
+
+  // 执行单个agent（带重试机制）
+  const executeAgent = async (selectedAgent: Agent, retryCount = 0) => {
+    if (!job || !selectedAgent) return;
+    
+    const maxRetries = 2; // 最多重试2次
+    
+    try {
+      // 标记agent开始执行
+      setExecutingAgents(prev => new Set([...prev, selectedAgent.id]));
       
-      // 通过后端API执行特定Agent任务
-      console.log('通过后端执行Agent任务:', selectedAgent.id, job.id);
+      console.log('执行Agent任务:', selectedAgent.id, job.id, retryCount > 0 ? `(重试 ${retryCount}/${maxRetries})` : '');
       
       const result = await queueApi.executeJobWithAgent(job.id, selectedAgent.id);
       console.log('Agent执行结果:', result);
@@ -102,20 +137,104 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       
       const agentResult = result.result || result.agentResponse;
 
-      // 设置执行结果
-      setExecutionResult({
+      // 保存agent的执行结果
+      const executionResult = {
         jobId: job.id,
         jobTitle: job.jobTitle,
         status: 'Completed',
         executionResult: agentResult,
         executedAt: new Date().toISOString(),
         executionError: null,
-        hasResult: true
-      });
+        hasResult: true,
+        agentId: selectedAgent.id
+      };
 
-      message.success('任务执行成功！');
+      setAgentResults(prev => new Map(prev.set(selectedAgent.id, executionResult)));
       
-      // 自动处理支付流程
+      console.log(`Agent ${selectedAgent.id} 执行成功`);
+      
+      // 执行成功，移除执行状态和重试状态
+      setExecutingAgents(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(selectedAgent.id);
+        return newSet;
+      });
+      setRetryingAgents(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(selectedAgent.id);
+        return newMap;
+      });
+      
+    } catch (error) {
+      console.error(`Agent ${selectedAgent.id} 执行失败:`, error);
+      
+      // 如果是超时错误且还有重试次数，则重试
+      const isTimeoutError = error instanceof Error && (
+        error.message.includes('timeout') || 
+        error.message.includes('Network Error') ||
+        error.message.includes('ECONNABORTED')
+      );
+      
+      if (isTimeoutError && retryCount < maxRetries) {
+        console.log(`Agent ${selectedAgent.id} 超时，准备重试 ${retryCount + 1}/${maxRetries}...`);
+        
+        // 记录重试状态
+        setRetryingAgents(prev => new Map(prev.set(selectedAgent.id, retryCount + 1)));
+        
+        // 等待2秒后重试
+        setTimeout(() => {
+          executeAgent(selectedAgent, retryCount + 1);
+        }, 2000);
+        return; // 不移除执行状态，继续显示执行中
+      }
+      
+      // 保存执行错误结果
+      const errorResult = {
+        jobId: job.id,
+        jobTitle: job.jobTitle,
+        status: 'Failed',
+        executionResult: null,
+        executedAt: new Date().toISOString(),
+        executionError: error instanceof Error ? error.message : '未知错误',
+        hasResult: false,
+        agentId: selectedAgent.id
+      };
+
+      setAgentResults(prev => new Map(prev.set(selectedAgent.id, errorResult)));
+      
+      // 只有在不重试的情况下才移除执行状态和重试状态
+      setExecutingAgents(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(selectedAgent.id);
+        return newSet;
+      });
+      setRetryingAgents(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(selectedAgent.id);
+        return newMap;
+      });
+    }
+  };
+
+  // 处理用户接受某个agent的执行结果
+  const handleAcceptResult = async (selectedAgent: Agent) => {
+    if (!job || !selectedAgent) return;
+    
+    try {
+      setSelectedWinner(selectedAgent.id);
+      setPaymentProcessing(true);
+      
+      message.success(`已选择Agent: ${selectedAgent.agentName}的执行结果`);
+      
+      // 先完成job状态更新
+      console.log('完成Job状态更新:', job.id, selectedAgent.id);
+      const completeResult = await queueApi.completeJobWithAgent(job.id, selectedAgent.id);
+      
+      if (!completeResult.success) {
+        throw new Error(completeResult.error || 'Job完成失败');
+      }
+      
+      // 然后处理支付流程
       await handlePayment(selectedAgent);
       
       // 更新agents状态，标记获胜者
@@ -133,22 +252,8 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       }
       
     } catch (error) {
-      console.error('执行失败:', error);
-      
-      // 设置执行错误结果
-      setExecutionResult({
-        jobId: job.id,
-        jobTitle: job.jobTitle,
-        status: 'Failed',
-        executionResult: null,
-        executedAt: new Date().toISOString(),
-        executionError: error instanceof Error ? error.message : '未知错误',
-        hasResult: false
-      });
-
-      message.error('执行失败: ' + (error instanceof Error ? error.message : '未知错误'));
-    } finally {
-      setExecuting(null);
+      console.error('接受结果失败:', error);
+      message.error('接受结果失败: ' + (error instanceof Error ? error.message : '未知错误'));
     }
   };
 
@@ -199,27 +304,41 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       
       message.success('支付和退款处理完成！');
       
-      // 更新执行结果，添加支付信息
-      setExecutionResult((prev: any) => prev ? {
-        ...prev,
-        paymentInfo: {
-          agentPayment: agentPayment.toString(),
-          agentAddress: agentWalletAddress,
-          paymentTx,
-          refundTx,
-          paymentProcessedAt: new Date().toISOString()
+      // 更新选中agent的执行结果，添加支付信息
+      setAgentResults(prev => {
+        const result = prev.get(selectedAgent.id);
+        if (result) {
+          const updatedResult = {
+            ...result,
+            paymentInfo: {
+              agentPayment: agentPayment.toString(),
+              agentAddress: agentWalletAddress,
+              paymentTx,
+              refundTx,
+              paymentProcessedAt: new Date().toISOString()
+            }
+          };
+          return new Map(prev.set(selectedAgent.id, updatedResult));
         }
-      } : prev);
+        return prev;
+      });
       
     } catch (error) {
       console.error('支付处理失败:', error);
       message.error('支付处理失败: ' + (error instanceof Error ? error.message : '未知错误'));
       
-      // 即使支付失败，也要更新执行结果
-      setExecutionResult((prev: any) => prev ? {
-        ...prev,
-        paymentError: error instanceof Error ? error.message : '支付处理失败'
-      } : prev);
+      // 即使支付失败，也要更新选中agent的执行结果
+      setAgentResults(prev => {
+        const result = prev.get(selectedAgent.id);
+        if (result) {
+          const updatedResult = {
+            ...result,
+            paymentError: error instanceof Error ? error.message : '支付处理失败'
+          };
+          return new Map(prev.set(selectedAgent.id, updatedResult));
+        }
+        return prev;
+      });
     } finally {
       setPaymentProcessing(false);
     }
@@ -240,18 +359,18 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       // Job 节点
       {
         id: job.id,
-        name: job.jobTitle,
+        name: job.jobTitle || 'Untitled Job',
         type: "job",
         group: 0,
       },
       // Agent 节点
       ...agents.map((agent) => ({
         id: agent.id,
-        name: agent.agentName,
+        name: agent.agentName || 'Unknown Agent',
         type: "agent" as const,
         status: agent.status,
-        isWinner: agent.isWinner || agent.status === "winner",
-        group: agent.isWinner || agent.status === "winner" ? 1 : 2,
+        isWinner: selectedWinner === agent.id,
+        group: selectedWinner === agent.id ? 1 : 2,
       })),
     ];
 
@@ -294,7 +413,10 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       .selectAll("text")
       .data(nodes)
       .join("text")
-      .text((d: any) => d.name.length > 10 ? d.name.substring(0, 10) + '...' : d.name)
+      .text((d: any) => {
+        const name = d.name || 'Unnamed';
+        return name.length > 10 ? name.substring(0, 10) + '...' : name;
+      })
       .attr("font-size", 10)
       .attr("text-anchor", "middle")
       .attr("dy", 3)
@@ -319,7 +441,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
     return () => {
       simulation.stop();
     };
-  }, [visible, job, agents]);
+  }, [visible, job, agents, selectedWinner]);
 
   if (!job) return null;
 
@@ -385,17 +507,17 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
           
           <Divider orientation="left" orientationMargin="0">任务描述</Divider>
           <Paragraph ellipsis={{ rows: 3, expandable: true }}>
-            {job.description}
+            {job.description || '暂无描述'}
           </Paragraph>
           
           <Divider orientation="left" orientationMargin="0">交付要求</Divider>
           <Paragraph ellipsis={{ rows: 2, expandable: true }}>
-            {job.deliverables}
+            {job.deliverables || '暂无交付要求'}
           </Paragraph>
 
           <Divider orientation="left" orientationMargin="0">标签</Divider>
           <div>
-            {job.tags.split(',').map((tag, index) => (
+            {(job.tags || '').split(',').filter(tag => tag.trim()).map((tag, index) => (
               <Tag key={index} style={{ marginBottom: '4px' }}>
                 {tag.trim()}
               </Tag>
@@ -437,6 +559,16 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
             <Space>
               <UserOutlined />
               <span>匹配的Agents ({agents.length})</span>
+              {executingAgents.size > 0 && (
+                <Tag color="processing" icon={<PlayCircleOutlined />}>
+                  执行中 ({executingAgents.size})
+                </Tag>
+              )}
+              {selectedWinner && (
+                <Tag color="success" icon={<TrophyOutlined />}>
+                  已选择获胜者
+                </Tag>
+              )}
             </Space>
           }
           size="small"
@@ -446,34 +578,72 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
             dataSource={agents || []}
             renderItem={(agent, index) => {
               if (!agent || !agent.id) return null;
+              const isExecuting = executingAgents.has(agent.id);
+              const retryCount = retryingAgents.get(agent.id) || 0;
+              const agentResult = agentResults.get(agent.id);
+              const isSelected = selectedWinner === agent.id;
+              const hasResult = agentResult && agentResult.hasResult;
+              
               return (
               <List.Item
                 key={agent.id}
                 style={{
-                  padding: '12px',
-                  border: agent.isWinner ? '2px solid #52c41a' : '1px solid #f0f0f0',
+                  padding: '16px',
+                  border: isSelected ? '2px solid #52c41a' : '1px solid #f0f0f0',
                   borderRadius: '8px',
-                  marginBottom: '8px',
-                  backgroundColor: agent.isWinner ? '#f6ffed' : '#fafafa'
+                  marginBottom: '12px',
+                  backgroundColor: isSelected ? '#f6ffed' : '#fafafa'
                 }}
                 actions={[
-                  job.status === 'Matched' && (
+                  // 显示执行状态或接受按钮
+                  isExecuting ? (
                     <Button 
-                      type={agent.isWinner ? "default" : "primary"}
+                      type="default"
                       size="small"
-                      loading={executing === agent.id}
-                      icon={agent.isWinner ? <TrophyOutlined /> : <PlayCircleOutlined />}
-                      onClick={() => handleExecute(agent)}
-                      disabled={!!executing && executing !== agent.id}
+                      loading={true}
+                      icon={<PlayCircleOutlined />}
+                      disabled
+                    >
+                      {retryCount > 0 ? `重试中 ${retryCount}/2` : '执行中...'}
+                    </Button>
+                  ) : hasResult && !isSelected && !selectedWinner ? (
+                    <Button 
+                      type="primary"
+                      size="small"
+                      icon={<CheckCircleOutlined />}
+                      onClick={() => handleAcceptResult(agent)}
                       style={{
-                        backgroundColor: agent.isWinner ? '#52c41a' : undefined,
-                        borderColor: agent.isWinner ? '#52c41a' : undefined,
-                        color: agent.isWinner ? '#fff' : undefined
+                        backgroundColor: '#52c41a',
+                        borderColor: '#52c41a'
                       }}
                     >
-                      {agent.isWinner ? '已获胜' : (executing === agent.id ? '执行中...' : '执行')}
+                      接受
                     </Button>
-                  )
+                  ) : isSelected ? (
+                    <Button 
+                      type="default"
+                      size="small"
+                      icon={<TrophyOutlined />}
+                      disabled
+                      style={{
+                        backgroundColor: '#52c41a',
+                        borderColor: '#52c41a',
+                        color: '#fff'
+                      }}
+                    >
+                      已选择
+                    </Button>
+                  ) : agentResult && !agentResult.hasResult ? (
+                    <Button 
+                      type="default"
+                      size="small"
+                      icon={<ExclamationCircleOutlined />}
+                      disabled
+                      danger
+                    >
+                      执行失败
+                    </Button>
+                  ) : null
                 ].filter(Boolean)}
               >
                 <List.Item.Meta
@@ -507,7 +677,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                             {((agent.successRate || 0) * 100).toFixed(1)}%
                           </span>
                         </Text>
-                        {(agent as any).matchScore && (
+                        {(agent as any).matchScore && typeof (agent as any).matchScore === 'number' && (
                           <Text>
                             <strong>匹配度:</strong> 
                             <span style={{ color: '#722ed1', marginLeft: '4px' }}>
@@ -528,7 +698,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                         <Text type="secondary">描述: </Text>
                         <Text 
                           ellipsis={{ 
-                            tooltip: agent.description 
+                            tooltip: agent.description || '暂无描述'
                           }}
                           style={{ maxWidth: '100%', display: 'block' }}
                         >
@@ -556,6 +726,86 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                           )}
                         </div>
                       </div>
+
+                      {/* 执行结果显示区域 */}
+                      {agentResult && (
+                        <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #e8e8e8' }}>
+                          <div style={{ marginBottom: '8px' }}>
+                            <Text strong>执行结果:</Text>
+                            <Tag 
+                              color={agentResult.status === 'Completed' ? 'success' : 'error'}
+                              style={{ marginLeft: '8px' }}
+                            >
+                              {agentResult.status === 'Completed' ? '执行成功' : '执行失败'}
+                            </Tag>
+                            {agentResult.executedAt && (
+                              <Text type="secondary" style={{ marginLeft: '8px', fontSize: '12px' }}>
+                                {new Date(agentResult.executedAt).toLocaleString()}
+                              </Text>
+                            )}
+                          </div>
+                          
+                          {agentResult.executionError ? (
+                            <Alert
+                              message={agentResult.executionError}
+                              type="error"
+                              size="small"
+                              showIcon
+                            />
+                          ) : agentResult.executionResult ? (
+                            <div style={{ 
+                              background: '#f5f5f5', 
+                              padding: '8px', 
+                              borderRadius: '4px',
+                              maxHeight: '150px',
+                              overflow: 'auto'
+                            }}>
+                              <pre style={{ 
+                                margin: 0, 
+                                whiteSpace: 'pre-wrap',
+                                wordWrap: 'break-word',
+                                fontSize: '12px'
+                              }}>
+                                {typeof agentResult.executionResult === 'string' 
+                                  ? agentResult.executionResult 
+                                  : JSON.stringify(agentResult.executionResult, null, 2)
+                                }
+                              </pre>
+                            </div>
+                          ) : null}
+
+                          {/* 支付信息显示 */}
+                          {agentResult.paymentInfo && (
+                            <div style={{ marginTop: '12px', padding: '8px', backgroundColor: '#f0f9ff', borderRadius: '4px', border: '1px solid #91d5ff' }}>
+                              <div style={{ marginBottom: '4px' }}>
+                                <Text strong style={{ color: '#1890ff' }}>支付信息:</Text>
+                              </div>
+                              <div style={{ fontSize: '12px' }}>
+                                <div>Agent支付: <Tag color="success">{agentResult.paymentInfo.agentPayment} ETH</Tag></div>
+                                <div style={{ marginTop: '4px' }}>
+                                  支付地址: {(agentResult.paymentInfo.agentAddress || '').slice(0, 6)}...{(agentResult.paymentInfo.agentAddress || '').slice(-4)}
+                                </div>
+                                <div style={{ marginTop: '4px' }}>
+                                  处理时间: {agentResult.paymentInfo.paymentProcessedAt ? new Date(agentResult.paymentInfo.paymentProcessedAt).toLocaleString() : '未知'}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 支付错误信息 */}
+                          {agentResult.paymentError && (
+                            <div style={{ marginTop: '8px' }}>
+                              <Alert
+                                message="支付处理失败"
+                                description={agentResult.paymentError}
+                                type="warning"
+                                size="small"
+                                showIcon
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </Space>
                   }
                 />
@@ -572,13 +822,13 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                 {matchRecord.matchCriteria?.algorithm || 'Unknown'}
               </Descriptions.Item>
               <Descriptions.Item label="匹配时间">
-                {new Date(matchRecord.createdAt).toLocaleString()}
+                {matchRecord.createdAt ? new Date(matchRecord.createdAt).toLocaleString() : '未知'}
               </Descriptions.Item>
               <Descriptions.Item label="候选Agent数">
-                {matchRecord.totalAgents}
+                {matchRecord.totalAgents || 0}
               </Descriptions.Item>
               <Descriptions.Item label="匹配得分">
-                {matchRecord.matchCriteria?.matchScore ? 
+                {matchRecord.matchCriteria?.matchScore && typeof matchRecord.matchCriteria.matchScore === 'number' ? 
                   `${(matchRecord.matchCriteria.matchScore * 100).toFixed(1)}%` : 
                   'N/A'
                 }
@@ -587,130 +837,6 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
           </Card>
         )}
 
-        {/* 执行结果展示 */}
-        {(executionResult || loadingResult || job.status === 'Completed' || job.status === 'Failed') && (
-          <Card 
-            title={
-              <Space>
-                {(executionResult?.status === 'Completed' || job.status === 'Completed') ? (
-                  <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                ) : (
-                  <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />
-                )}
-                <span>执行结果</span>
-              </Space>
-            } 
-            size="small"
-          >
-            {loadingResult ? (
-              <div style={{ textAlign: 'center', padding: '20px' }}>
-                <Spin size="large" />
-                <div style={{ marginTop: '12px' }}>正在获取执行结果...</div>
-              </div>
-            ) : executionResult ? (
-              <div>
-                <Descriptions size="small" column={1}>
-                  <Descriptions.Item label="执行状态">
-                    <Tag color={(executionResult?.status === 'Completed' || job.status === 'Completed') ? 'success' : 'error'}>
-                      {(executionResult?.status === 'Completed' || job.status === 'Completed') ? '执行成功' : '执行失败'}
-                    </Tag>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="执行时间">
-                    {executionResult.executedAt ? new Date(executionResult.executedAt).toLocaleString() : '未知'}
-                  </Descriptions.Item>
-                </Descriptions>
-
-                {executionResult.executionError ? (
-                  <div>
-                    <Divider orientation="left" orientationMargin="0">错误信息</Divider>
-                    <Alert
-                      message={executionResult.executionError}
-                      type="error"
-                      showIcon
-                    />
-                  </div>
-                ) : executionResult.executionResult ? (
-                  <div>
-                    <Divider orientation="left" orientationMargin="0">Agent响应</Divider>
-                    <div style={{ 
-                      background: '#f5f5f5', 
-                      padding: '12px', 
-                      borderRadius: '6px',
-                      maxHeight: '300px',
-                      overflow: 'auto'
-                    }}>
-                      <pre style={{ 
-                        margin: 0, 
-                        whiteSpace: 'pre-wrap',
-                        wordWrap: 'break-word'
-                      }}>
-                        {typeof executionResult.executionResult === 'string' 
-                          ? executionResult.executionResult 
-                          : JSON.stringify(executionResult.executionResult, null, 2)
-                        }
-                      </pre>
-                    </div>
-                  </div>
-                ) : null}
-
-                {/* 支付信息展示 */}
-                {executionResult.paymentInfo && (
-                  <div>
-                    <Divider orientation="left" orientationMargin="0">
-                      <Space>
-                        <WalletOutlined style={{ color: '#52c41a' }} />
-                        <span>支付信息</span>
-                      </Space>
-                    </Divider>
-                    <Descriptions size="small" column={1}>
-                      <Descriptions.Item label="Agent支付">
-                        <Space>
-                          <Tag color="success">{executionResult.paymentInfo.agentPayment} ETH</Tag>
-                          <Text type="secondary">
-                            → {executionResult.paymentInfo.agentAddress.slice(0, 6)}...{executionResult.paymentInfo.agentAddress.slice(-4)}
-                          </Text>
-                        </Space>
-                      </Descriptions.Item>
-                      <Descriptions.Item label="支付交易">
-                        <Text code copyable style={{ fontSize: '12px' }}>
-                          {executionResult.paymentInfo.paymentTx}
-                        </Text>
-                      </Descriptions.Item>
-                      <Descriptions.Item label="退款交易">
-                        <Text code copyable style={{ fontSize: '12px' }}>
-                          {executionResult.paymentInfo.refundTx}
-                        </Text>
-                      </Descriptions.Item>
-                      <Descriptions.Item label="处理时间">
-                        {new Date(executionResult.paymentInfo.paymentProcessedAt).toLocaleString()}
-                      </Descriptions.Item>
-                    </Descriptions>
-                  </div>
-                )}
-
-                {/* 支付错误信息 */}
-                {executionResult.paymentError && (
-                  <div>
-                    <Divider orientation="left" orientationMargin="0">支付错误</Divider>
-                    <Alert
-                      message="支付处理失败"
-                      description={executionResult.paymentError}
-                      type="warning"
-                      showIcon
-                    />
-                  </div>
-                )}
-              </div>
-            ) : (
-              <Alert
-                message="暂无执行结果"
-                description="任务可能正在执行中，请稍后查看"
-                type="info"
-                showIcon
-              />
-            )}
-          </Card>
-        )}
       </div>
 
       <Divider />
@@ -718,7 +844,11 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       <div style={{ textAlign: 'center' }}>
         <Space size="large">
           <Button size="large" onClick={() => {
-            setExecutionResult(null);
+            setAgentResults(new Map());
+            setExecutingAgents(new Set());
+            setRetryingAgents(new Map());
+            setSelectedWinner(null);
+            setAutoExecutionStarted(false);
             setLoadingResult(false);
             setAgents([]);
             setJobMatchDetails(null);

@@ -109,8 +109,8 @@ const JobResultPage: React.FC = () => {
         <Card title="任务信息" style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div style={{ flex: 1 }}>
-              <Title level={4}>{job.jobTitle}</Title>
-              <Paragraph type="secondary">{job.description}</Paragraph>
+              <Title level={4}>{job.jobTitle || '无标题'}</Title>
+              <Paragraph type="secondary">{job.description || '暂无描述'}</Paragraph>
               
               <Space wrap>
                 <Text strong>状态:</Text>
@@ -128,13 +128,13 @@ const JobResultPage: React.FC = () => {
               </Space>
 
               <div style={{ marginTop: '16px' }}>
-                <Text strong>分类:</Text> <Tag>{job.category}</Tag>
-                <Text strong style={{ marginLeft: '16px' }}>优先级:</Text> <Tag>{job.priority}</Tag>
-                <Text strong style={{ marginLeft: '16px' }}>技能要求:</Text> <Tag>{job.skillLevel}</Tag>
+                <Text strong>分类:</Text> <Tag>{job.category || '未分类'}</Tag>
+                <Text strong style={{ marginLeft: '16px' }}>优先级:</Text> <Tag>{job.priority || '普通'}</Tag>
+                <Text strong style={{ marginLeft: '16px' }}>技能要求:</Text> <Tag>{job.skillLevel || '未设定'}</Tag>
               </div>
 
               <div style={{ marginTop: '8px' }}>
-                <Text strong>标签:</Text> {job.tags}
+                <Text strong>标签:</Text> {job.tags || '无'}
               </div>
 
               {job.executedAt && (
@@ -156,7 +156,12 @@ const JobResultPage: React.FC = () => {
               maxHeight: '600px',
               overflow: 'auto'
             }}>
-              <ReactMarkdown>{job.executionResult}</ReactMarkdown>
+              <ReactMarkdown>
+                {typeof job.executionResult === 'string' 
+                  ? job.executionResult 
+                  : JSON.stringify(job.executionResult, null, 2)
+                }
+              </ReactMarkdown>
             </div>
           </Card>
         )}
@@ -166,7 +171,7 @@ const JobResultPage: React.FC = () => {
           <Card title="执行错误" style={{ marginBottom: '16px' }}>
             <Alert
               message="任务执行失败"
-              description={job.executionError}
+              description={job.executionError || '未知错误'}
               type="error"
               showIcon
             />
@@ -178,14 +183,14 @@ const JobResultPage: React.FC = () => {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div>
               <Text strong>交付物要求:</Text>
-              <Paragraph style={{ marginTop: '8px' }}>{job.deliverables}</Paragraph>
+              <Paragraph style={{ marginTop: '8px' }}>{job.deliverables || '暂无要求'}</Paragraph>
             </div>
             
             <div>
               <Text strong>预算信息:</Text>
               <div style={{ marginTop: '8px' }}>
                 <div>最大预算: ${(job.maxBudget || 0).toLocaleString()}</div>
-                <div>付款方式: {job.paymentType}</div>
+                <div>付款方式: {job.paymentType || '未设定'}</div>
                 {job.deadline && <div>截止时间: {new Date(job.deadline).toLocaleDateString()}</div>}
               </div>
             </div>

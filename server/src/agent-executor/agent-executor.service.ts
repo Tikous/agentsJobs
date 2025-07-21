@@ -30,15 +30,18 @@ export class AgentExecutorService {
         throw new Error('Job或Agent不存在');
       }
 
-      if (job.status !== JobStatus.MATCHED) {
+      // 允许MATCHED或IN_PROGRESS状态的job执行（支持多agent并行执行）
+      if (job.status !== JobStatus.MATCHED && job.status !== JobStatus.IN_PROGRESS) {
         throw new Error(`Job状态不正确: ${job.status}`);
       }
 
-      // 更新Job状态为工作中
-      await this.prisma.write.job.update({
-        where: { id: jobId },
-        data: { status: JobStatus.IN_PROGRESS }
-      });
+      // 如果job还是MATCHED状态，更新为IN_PROGRESS（只更新一次）
+      if (job.status === JobStatus.MATCHED) {
+        await this.prisma.write.job.update({
+          where: { id: jobId },
+          data: { status: JobStatus.IN_PROGRESS }
+        });
+      }
 
       // 构造Agent API请求格式，优先使用自定义参数
       const requestPayload = {
@@ -75,16 +78,9 @@ export class AgentExecutorService {
         }
       });
 
-      // 更新Job状态为完成，保存执行结果
-      await this.prisma.write.job.update({
-        where: { id: jobId },
-        data: {
-          status: JobStatus.COMPLETED,
-          executionResult: executionResult, // 保存Agent的执行结果
-          executedAt: new Date(),
-          executionError: null
-        }
-      });
+      // 注意：不在这里更新Job状态为COMPLETED，保持IN_PROGRESS状态
+      // Job状态将在用户选择最终agent后由前端或专门的API更新
+      // 这里只记录agent的执行成功，但job本身还未完成
 
       // 更新匹配记录
       await this.prisma.write.jobDistributionRecord.updateMany({
@@ -109,15 +105,9 @@ export class AgentExecutorService {
     } catch (error) {
       this.logger.error(`执行Job ${jobId} 失败: ${error.message}`, error.stack);
 
-      // 更新Job状态为失败，记录错误信息
-      await this.prisma.write.job.update({
-        where: { id: jobId },
-        data: { 
-          status: JobStatus.FAILED,
-          executionError: error.message,
-          executedAt: new Date()
-        }
-      });
+      // 注意：单个agent失败时不更新Job状态为FAILED
+      // Job状态保持IN_PROGRESS，允许其他agents继续执行
+      // 只有当所有agents都失败或用户明确选择时才更新job状态
 
       return {
         success: false,
@@ -168,7 +158,7 @@ export class AgentExecutorService {
       where: { id: jobId }
     });
 
-    if (!job || job.status !== JobStatus.MATCHED) {
+    if (!job || (job.status !== JobStatus.MATCHED && job.status !== JobStatus.IN_PROGRESS)) {
       throw new Error(`Job状态不正确: ${job?.status || 'NOT_FOUND'}`);
     }
 
@@ -232,8 +222,58 @@ export class AgentExecutorService {
       agent: agentsWithMatchInfo[0], // 保持向后兼容性
       matchRecords, // 返回所有匹配记录
       matchRecord: matchRecords[0], // 保持向后兼容性
-      canExecute: job.status === JobStatus.MATCHED
+      canExecute: job.status === JobStatus.MATCHED || job.status === JobStatus.IN_PROGRESS
     };
+  }
+
+  /**
+   * 用户选择最终agent并完成Job
+   */
+  async completeJobWithSelectedAgent(jobId: string, selectedAgentId: string) {
+    this.logger.log(`用户选择Agent ${selectedAgentId} 作为Job ${jobId} 的最终结果`);
+
+    try {
+      // 获取Job和Agent信息
+      const [job, agent] = await Promise.all([
+        this.prisma.read.job.findUnique({ where: { id: jobId } }),
+        this.prisma.read.agent.findUnique({ where: { id: selectedAgentId } })
+      ]);
+
+      if (!job || !agent) {
+        throw new Error('Job或Agent不存在');
+      }
+
+      if (job.status !== JobStatus.IN_PROGRESS) {
+        throw new Error(`Job状态不正确: ${job.status}，无法完成`);
+      }
+
+      // 更新Job状态为完成
+      await this.prisma.write.job.update({
+        where: { id: jobId },
+        data: {
+          status: JobStatus.COMPLETED,
+          executedAt: new Date(),
+          executionError: null
+        }
+      });
+
+      this.logger.log(`Job ${jobId} 已完成，选择的Agent: ${selectedAgentId}`);
+
+      return {
+        success: true,
+        message: 'Job已完成',
+        selectedAgent: agent,
+        completedAt: new Date()
+      };
+
+    } catch (error) {
+      this.logger.error(`完成Job ${jobId} 失败: ${error.message}`, error.stack);
+      
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }
 
   /**
