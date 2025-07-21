@@ -443,8 +443,10 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
           style={{ marginBottom: '16px' }}
         >
           <List
-            dataSource={agents}
-            renderItem={(agent, index) => (
+            dataSource={agents || []}
+            renderItem={(agent, index) => {
+              if (!agent || !agent.id) return null;
+              return (
               <List.Item
                 key={agent.id}
                 style={{
@@ -478,10 +480,10 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                   title={
                     <Space>
                       <Text strong style={{ fontSize: '16px' }}>
-                        #{index + 1} {agent.agentName}
+                        #{index + 1} {agent.agentName || 'Unknown Agent'}
                       </Text>
                       {agent.isWinner && <TrophyOutlined style={{ color: '#52c41a' }} />}
-                      <Tag color="blue">{agent.agentClassification}</Tag>
+                      <Tag color="blue">{agent.agentClassification || 'Unknown'}</Tag>
                     </Space>
                   }
                   description={
@@ -518,7 +520,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                       <div>
                         <Text type="secondary">Agent地址: </Text>
                         <Text code copyable style={{ fontSize: '12px' }}>
-                          {agent.agentAddress}
+                          {agent.agentAddress || 'N/A'}
                         </Text>
                       </div>
 
@@ -530,9 +532,9 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                           }}
                           style={{ maxWidth: '100%', display: 'block' }}
                         >
-                          {agent.description.length > 100 ? 
-                            agent.description.substring(0, 100) + '...' : 
-                            agent.description
+                          {(agent.description || '').length > 100 ? 
+                            (agent.description || '').substring(0, 100) + '...' : 
+                            (agent.description || '暂无描述')
                           }
                         </Text>
                       </div>
@@ -540,14 +542,16 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                       <div>
                         <Text type="secondary">标签: </Text>
                         <div style={{ marginTop: '4px' }}>
-                          {agent.tags.split(',').slice(0, 3).map((tag, tagIndex) => (
-                            <Tag key={tagIndex} color="purple" style={{ marginBottom: '2px', fontSize: '12px' }}>
-                              {tag.trim()}
-                            </Tag>
+                          {(agent.tags || '').split(',').slice(0, 3).map((tag, tagIndex) => (
+                            tag.trim() && (
+                              <Tag key={tagIndex} color="purple" style={{ marginBottom: '2px', fontSize: '12px' }}>
+                                {tag.trim()}
+                              </Tag>
+                            )
                           ))}
-                          {agent.tags.split(',').length > 3 && (
+                          {(agent.tags || '').split(',').length > 3 && (
                             <Tag color="default" style={{ fontSize: '12px' }}>
-                              +{agent.tags.split(',').length - 3}
+                              +{(agent.tags || '').split(',').length - 3}
                             </Tag>
                           )}
                         </div>
@@ -556,7 +560,8 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                   }
                 />
               </List.Item>
-            )}
+              );
+            }}
           />
         </Card>
 
