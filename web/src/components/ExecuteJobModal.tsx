@@ -524,7 +524,12 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
 
                       <div>
                         <Text type="secondary">描述: </Text>
-                        <Text ellipsis={{ tooltip: agent.description }}>
+                        <Text 
+                          ellipsis={{ 
+                            tooltip: agent.description 
+                          }}
+                          style={{ maxWidth: '100%', display: 'block' }}
+                        >
                           {agent.description.length > 100 ? 
                             agent.description.substring(0, 100) + '...' : 
                             agent.description
