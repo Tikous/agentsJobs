@@ -16,8 +16,8 @@ export class AgentExecutorService {
   /**
    * 调用Agent执行任务
    */
-  async executeJobWithAgent(jobId: string, agentId: string) {
-    this.logger.log(`开始执行Job ${jobId} with Agent ${agentId}`);
+  async executeJobWithAgent(jobId: string, agentId: string, customPayload?: { message?: string; context?: any }) {
+    this.logger.log(`开始执行Job ${jobId} with Agent ${agentId}`, customPayload);
 
     try {
       // 获取Job和Agent信息
@@ -40,10 +40,10 @@ export class AgentExecutorService {
         data: { status: JobStatus.IN_PROGRESS }
       });
 
-      // 构造新的Agent API请求格式
+      // 构造Agent API请求格式，优先使用自定义参数
       const requestPayload = {
-        message: job.description,
-        context: {
+        message: customPayload?.message || job.description,
+        context: customPayload?.context || {
           sessionId: `job_${jobId}_${Date.now()}`
         }
       };

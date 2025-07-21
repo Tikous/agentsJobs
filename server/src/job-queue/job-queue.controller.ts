@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JobQueueService } from './job-queue.service';
 import { MatchingService } from '../matching/matching.service';
@@ -54,8 +54,12 @@ export class JobQueueController {
   @Post('execute/:jobId/:agentId')
   @ApiOperation({ summary: '手动执行指定Job的特定Agent' })
   @ApiResponse({ status: 200, description: '执行结果' })
-  async executeJobWithAgent(@Param('jobId') jobId: string, @Param('agentId') agentId: string) {
-    return this.agentExecutorService.executeJobWithAgent(jobId, agentId);
+  async executeJobWithAgent(
+    @Param('jobId') jobId: string, 
+    @Param('agentId') agentId: string,
+    @Body() body?: { message?: string; context?: any }
+  ) {
+    return this.agentExecutorService.executeJobWithAgent(jobId, agentId, body);
   }
 
   @Get('result/:jobId')
