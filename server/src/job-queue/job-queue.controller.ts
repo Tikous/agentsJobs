@@ -51,6 +51,13 @@ export class JobQueueController {
     return this.agentExecutorService.triggerJobExecution(jobId);
   }
 
+  @Post('execute/:jobId/:agentId')
+  @ApiOperation({ summary: '手动执行指定Job的特定Agent' })
+  @ApiResponse({ status: 200, description: '执行结果' })
+  async executeJobWithAgent(@Param('jobId') jobId: string, @Param('agentId') agentId: string) {
+    return this.agentExecutorService.executeJobWithAgent(jobId, agentId);
+  }
+
   @Get('result/:jobId')
   @ApiOperation({ summary: '获取Job执行结果' })
   @ApiResponse({ status: 200, description: '执行结果详情' })

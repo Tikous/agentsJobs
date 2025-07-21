@@ -105,6 +105,11 @@ export const queueApi = {
     return response.data;
   },
 
+  executeJobWithAgent: async (jobId: string, agentId: string) => {
+    const response = await api.post(`/queue/execute/${jobId}/${agentId}`);
+    return response.data;
+  },
+
   getJobResult: async (jobId: string) => {
     const response = await api.get(`/queue/result/${jobId}`);
     return response.data;

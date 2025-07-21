@@ -90,45 +90,17 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
     try {
       setExecuting(selectedAgent.id);
       
-      // 直接调用Agent的地址
-      const requestPayload = {
-        message: job.description,
-        context: {
-          sessionId: `job_${job.id}_${Date.now()}`
-        }
-      };
-
-      console.log('调用Agent:', selectedAgent.agentAddress, requestPayload);
+      // 通过后端API执行特定Agent任务
+      console.log('通过后端执行Agent任务:', selectedAgent.id, job.id);
       
-      const response = await fetch(selectedAgent.agentAddress, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'accept': '*/*'
-        },
-        body: JSON.stringify(requestPayload)
-      });
-
-      console.log('Response status:', response.status);
-      console.log('Response ok:', response.ok);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.log('Error response:', errorText);
-        throw new Error(`Agent响应错误: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-
-      const responseText = await response.text();
-      console.log('Raw response text:', responseText);
+      const result = await queueApi.executeJobWithAgent(job.id, selectedAgent.id);
+      console.log('Agent执行结果:', result);
       
-      let agentResult;
-      try {
-        agentResult = JSON.parse(responseText);
-        console.log('Parsed agent result:', agentResult);
-      } catch (parseError) {
-        console.error('JSON parse error:', parseError);
-        throw new Error('Agent响应格式不正确: ' + responseText);
+      if (!result.success) {
+        throw new Error(result.error || 'Agent执行失败');
       }
+      
+      const agentResult = result.result || result.agentResponse;
 
       // 设置执行结果
       setExecutionResult({
