@@ -1,0 +1,94 @@
+.ant-layout {
+  background: #f0f2f5;
+}
+
+.ant-layout-header {
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 0 24px;
+}
+
+.ant-layout-content {
+  margin: 0;
+  background: #f0f2f5;
+}
+
+.page-container {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+.rounded-table .ant-table {
+  border-radius: 12px;
+  width: 100%;
+  table-layout: auto;
+}
+
+.rounded-table .ant-table-container {
+  overflow-x: auto;
+}
+
+.rounded-table .ant-table-content {
+  overflow: visible !important;
+}
+
+.rounded-table .ant-table-fixed-left,
+.rounded-table .ant-table-fixed-right {
+  z-index: 2;
+}
+
+.rounded-table .ant-table-cell-fix-left,
+.rounded-table .ant-table-cell-fix-right {
+  z-index: 1;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.form-container {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.table-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.search-container {
+  margin-bottom: 16px;
+}
+
+.filters-container {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .ant-layout-content {
+    padding: 16px;
+  }
+  
+  .page-header {
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  
+  .filters-container {
+    flex-direction: column;
+  }
+}

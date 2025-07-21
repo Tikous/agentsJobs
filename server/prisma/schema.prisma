@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_WRITE_URL")
+}
+
+model Agent {
+  id                    String                 @id @default(uuid())
+  agentName             String
+  agentAddress          String
+  description           String
+  authorBio             String
+  agentClassification   String
+  tags                  String
+  price                 Float                  @default(0.0)
+  isPrivate             Boolean
+  autoAcceptJobs        Boolean
+  contractType          String
+  isActive              Boolean
+  reputation            Float
+  successRate           Float
+  totalJobsCompleted    Int
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  walletAddress         String?
+  jobDistributionAgents JobDistributionAgent[]
+
+  @@map("agents")
+}
+
+model JobDistributionAgent {
+  id                String                @id @default(uuid())
+  jobDistributionId String
+  agentId           String
+  assignedAt        DateTime              @default(now())
+  agent             Agent                 @relation(fields: [agentId], references: [id])
+  jobDistribution   JobDistributionRecord @relation(fields: [jobDistributionId], references: [id])
+
+  @@map("job_distribution_agents")
+}
+
+model JobDistributionRecord {
+  id                    String                 @id @default(uuid())
+  jobId                 String
+  matchCriteria         Json
+  totalAgents           Int
+  assignedCount         Int
+  responseCount         Int
+  createdAt             DateTime               @default(now())
+  jobName               String
+  assignedAgentId       String?
+  assignedAgentName     String?
+  jobDistributionAgents JobDistributionAgent[]
+  job                   Job                    @relation(fields: [jobId], references: [id])
+
+  @@map("job_distribution_records")
+}
+
+model Job {
+  id                     String                  @id @default(uuid())
+  jobTitle               String
+  category               String
+  description            String
+  deliverables           String
+  budget                 Json
+  maxBudget              Float
+  deadline               DateTime?
+  paymentType            String
+  priority               String
+  skillLevel             String
+  tags                   String
+  status                 String
+  autoAssign             Boolean
+  allowBidding           Boolean
+  escrowEnabled          Boolean
+  isPublic               Boolean
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  walletAddress          String?
+  executionResult        Json?
+  executedAt             DateTime?
+  executionError         String?
+  jobDistributionRecords JobDistributionRecord[]
+
+  @@map("jobs")
+}

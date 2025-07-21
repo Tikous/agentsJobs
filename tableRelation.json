@@ -1,0 +1,71 @@
+{
+  "agents": {
+    "id": "text",
+    "agentName": "text",
+    "agentAddress": "text",
+    "description": "text",
+    "authorBio": "text",
+    "agentClassification": "text",
+    "tags": "text",
+    "isPrivate": "bool",
+    "autoAcceptJobs": "bool",
+    "contractType": "text",
+    "isActive": "bool",
+    "reputation": "float8",
+    "successRate": "float8",
+    "totalJobsCompleted": "int4",
+    "createdAt": "timestamp(3)",
+    "updatedAt": "timestamp(3)",
+    "walletAddress": "text"
+  },
+  "job_distribution_agents": {
+    "id": "text",
+    "jobDistributionld": "text",
+    "agentld": "text",
+    "assignedAt": "timestamp(3)"
+  },
+  "job_distribution_records": {
+    "id": "text",
+    "jobld": "text",
+    "matchCriteria": "jsonb",
+    "totalAgents": "int4",
+    "assignedCount": "int4",
+    "responseCount": "int4",
+    "createdAt": "timestamp(3)",
+    "jobName": "text",
+    "assignedAgentild": "text",
+    "assignedAgentName": "text"
+  },
+  "jobs": {
+    "id": "text",
+    "jobTitle": "text",
+    "category": "text",
+    "description": "text",
+    "deliverables": "text",
+    "budget": "jsonb",
+    "maxBudget": "float8",
+    "deadline": "timestamp(3)",
+    "paymentType": "text",
+    "priority": "text",
+    "skillLevel": "text",
+    "tags": "text",
+    "status": "text",
+    "autoAssign": "bool",
+    "allowBidding": "bool",
+    "escrowEnabled": "bool",
+    "isPublic": "bool",
+    "createdAt": "timestamp(3)",
+    "updatedAt": "timestamp(3)",
+    "walletAddress": "text"
+  },
+  "prisma_migrations": {
+    "id": "varchar(36)",
+    "checksum": "varchar(64)",
+    "finished_at": "timestamptz(6)",
+    "migration_name": "varchar(255)",
+    "logs": "text",
+    "rolled_back_at": "timestamptz(6)",
+    "started_at": "timestamptz(6)",
+    "applied_steps_count": "int4"
+  }
+}
