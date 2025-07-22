@@ -8,7 +8,7 @@ import * as d3 from 'd3';
 
 const { Title, Text, Paragraph } = Typography;
 
-interface ChartNode {
+interface ChartNode extends d3.SimulationNodeDatum {
   id: string;
   name: string;
   type: 'job' | 'agent';
@@ -22,12 +22,47 @@ interface ChartLink {
   target: string;
 }
 
+interface AgentExecutionResult {
+  jobId: string;
+  jobTitle: string;
+  status: 'Completed' | 'Failed';
+  executionResult: any;
+  executedAt: string;
+  executionError: string | null;
+  hasResult: boolean;
+  agentId: string;
+  paymentInfo?: {
+    agentPayment: string;
+    agentAddress: string;
+    paymentTx: string;
+    refundTx: string;
+    paymentProcessedAt: string;
+  };
+  paymentError?: string;
+}
+
+interface ExtendedAgent extends Agent {
+  executionResult?: {
+    agentId: string;
+    agentName: string;
+    agentAddress: string;
+    status: 'Completed' | 'Failed';
+    result: any;
+    executedAt: string;
+    error: string | null;
+  };
+  matchScore?: number;
+  rank?: number;
+  isWinner?: boolean;
+  status?: string;
+}
+
 interface ExecuteJobModalProps {
   visible: boolean;
   onClose: () => void;
   job: Job | null;
   agent: Agent | null;
-  matchRecord?: any;
+  matchRecord?: {id: string, jobId: string, assignedAgentId: string, createdAt: string, matchCriteria: any};
   onExecute?: () => Promise<void>;
   onExecuteComplete?: () => void;
 }
@@ -42,13 +77,13 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
 }) => {
   const [executingAgents, setExecutingAgents] = useState<Set<string>>(new Set()); // 记录正在执行的agent ids
   const [retryingAgents, setRetryingAgents] = useState<Map<string, number>>(new Map()); // 记录正在重试的agent和重试次数
-  const [agentResults, setAgentResults] = useState<Map<string, any>>(new Map()); // 存储每个agent的执行结果
+  const [agentResults, setAgentResults] = useState<Map<string, AgentExecutionResult>>(new Map()); // 存储每个agent的执行结果
   const [loadingResult, setLoadingResult] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [selectedWinner, setSelectedWinner] = useState<string | null>(null); // 用户选择的获胜agent
   const [autoExecutionStarted, setAutoExecutionStarted] = useState(false); // 是否已开始自动执行
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [jobMatchDetails, setJobMatchDetails] = useState<any>(null);
+  const [agents, setAgents] = useState<ExtendedAgent[]>([]);
+  const [jobMatchDetails, setJobMatchDetails] = useState<{job: Job, agents: ExtendedAgent[], matchRecords: any[]} | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
   // 获取job匹配详情和执行结果
@@ -64,12 +99,12 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
         // 获取匹配详情（包含多个agents）
         const matchDetails = await queueApi.getMatchDetails(job.id);
         setJobMatchDetails(matchDetails);
-        const matchedAgents = matchDetails.agents || [matchDetails.agent].filter(Boolean);
+        const matchedAgents: ExtendedAgent[] = matchDetails.agents || [matchDetails.agent].filter(Boolean);
         setAgents(matchedAgents);
         
         // 从后端返回的agents数据中恢复已存储的执行结果
         const resultMap = new Map();
-        matchedAgents.forEach(agent => {
+        matchedAgents.forEach((agent: ExtendedAgent) => {
           if (agent.executionResult) {
             // 将数据库中的执行结果转换为前端期望的格式
             const frontendResult = {
@@ -117,7 +152,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
   }, [visible, job, agent]);  // Remove autoExecutionStarted from dependencies to avoid infinite loop
 
   // 自动执行所有agents
-  const executeAllAgents = async (agentsToExecute: Agent[]) => {
+  const executeAllAgents = async (agentsToExecute: ExtendedAgent[]) => {
     if (!job || !agentsToExecute.length) return;
     
     console.log('开始自动执行所有agents:', agentsToExecute.map(a => a.id));
@@ -134,14 +169,14 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
   };
 
   // 执行单个agent（带重试机制）
-  const executeAgent = async (selectedAgent: Agent, retryCount = 0) => {
+  const executeAgent = async (selectedAgent: ExtendedAgent, retryCount = 0) => {
     if (!job || !selectedAgent) return;
     
     const maxRetries = 2; // 最多重试2次
     
     try {
       // 标记agent开始执行
-      setExecutingAgents(prev => new Set([...prev, selectedAgent.id]));
+      setExecutingAgents(prev => new Set([...Array.from(prev), selectedAgent.id]));
       
       console.log('执行Agent任务:', selectedAgent.id, job.id, retryCount > 0 ? `(重试 ${retryCount}/${maxRetries})` : '');
       
@@ -155,7 +190,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       const agentResult = result.result || result.agentResponse;
 
       // 保存agent的执行结果
-      const executionResult = {
+      const executionResult: AgentExecutionResult = {
         jobId: job.id,
         jobTitle: job.jobTitle,
         status: 'Completed',
@@ -206,7 +241,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       }
       
       // 保存执行错误结果
-      const errorResult = {
+      const errorResult: AgentExecutionResult = {
         jobId: job.id,
         jobTitle: job.jobTitle,
         status: 'Failed',
@@ -234,7 +269,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
   };
 
   // 处理用户接受某个agent的执行结果
-  const handleAcceptResult = async (selectedAgent: Agent) => {
+  const handleAcceptResult = async (selectedAgent: ExtendedAgent) => {
     if (!job || !selectedAgent) return;
     
     try {
@@ -255,8 +290,8 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       await handlePayment(selectedAgent);
       
       // 更新agents状态，标记获胜者
-      setAgents(prevAgents => 
-        prevAgents.map(a => ({
+      setAgents((prevAgents: ExtendedAgent[]) => 
+        prevAgents.map((a: ExtendedAgent) => ({
           ...a,
           isWinner: a.id === selectedAgent.id,
           status: a.id === selectedAgent.id ? 'winner' : 'available'
@@ -275,7 +310,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
   };
 
   // 处理支付流程
-  const handlePayment = async (selectedAgent: Agent) => {
+  const handlePayment = async (selectedAgent: ExtendedAgent) => {
     if (!job || !selectedAgent) return;
     
     try {
@@ -381,7 +416,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
         group: 0,
       },
       // Agent 节点
-      ...agents.map((agent) => ({
+      ...agents.map((agent: ExtendedAgent) => ({
         id: agent.id,
         name: agent.agentName || 'Unknown Agent',
         type: "agent" as const,
@@ -391,13 +426,13 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       })),
     ];
 
-    const links: ChartLink[] = agents.map(agent => ({
+    const links: ChartLink[] = agents.map((agent: ExtendedAgent) => ({
       source: job.id,
       target: agent.id
     }));
 
     // 创建力导向图
-    const simulation = d3.forceSimulation(nodes as any)
+    const simulation = d3.forceSimulation(nodes)
       .force("link", d3.forceLink(links).id((d: any) => d.id))
       .force("charge", d3.forceManyBody().strength(-300))
       .force("center", d3.forceCenter(width / 2, height / 2));
@@ -416,8 +451,8 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       .selectAll("circle")
       .data(nodes)
       .join("circle")
-      .attr("r", (d: any) => d.type === 'job' ? 20 : 15)
-      .attr("fill", (d: any) => {
+      .attr("r", (d: ChartNode) => d.type === 'job' ? 20 : 15)
+      .attr("fill", (d: ChartNode) => {
         if (d.type === 'job') return '#1890ff';
         if (d.isWinner) return '#52c41a';
         return '#fa8c16';
@@ -430,7 +465,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
       .selectAll("text")
       .data(nodes)
       .join("text")
-      .text((d: any) => {
+      .text((d: ChartNode) => {
         const name = d.name || 'Unnamed';
         return name.length > 10 ? name.substring(0, 10) + '...' : name;
       })
@@ -441,10 +476,10 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
 
     simulation.on("tick", () => {
       link
-        .attr("x1", (d: any) => d.source.x)
-        .attr("y1", (d: any) => d.source.y)
-        .attr("x2", (d: any) => d.target.x)
-        .attr("y2", (d: any) => d.target.y);
+        .attr("x1", (d: any) => (d.source as any).x)
+        .attr("y1", (d: any) => (d.source as any).y)
+        .attr("x2", (d: any) => (d.target as any).x)
+        .attr("y2", (d: any) => (d.target as any).y);
 
       node
         .attr("cx", (d: any) => d.x)
@@ -593,7 +628,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
         >
           <List
             dataSource={agents || []}
-            renderItem={(agent, index) => {
+            renderItem={(agent: ExtendedAgent, index: number) => {
               if (!agent || !agent.id) return null;
               const isExecuting = executingAgents.has(agent.id);
               const retryCount = retryingAgents.get(agent.id) || 0;
@@ -766,7 +801,6 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                             <Alert
                               message={agentResult.executionError}
                               type="error"
-                              size="small"
                               showIcon
                             />
                           ) : agentResult.executionResult ? (
@@ -816,7 +850,6 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                                 message="支付处理失败"
                                 description={agentResult.paymentError}
                                 type="warning"
-                                size="small"
                                 showIcon
                               />
                             </div>
@@ -842,7 +875,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
                 {matchRecord.createdAt ? new Date(matchRecord.createdAt).toLocaleString() : '未知'}
               </Descriptions.Item>
               <Descriptions.Item label="候选Agent数">
-                {matchRecord.totalAgents || 0}
+                {(matchRecord as any)?.totalAgents || 0}
               </Descriptions.Item>
               <Descriptions.Item label="匹配得分">
                 {matchRecord.matchCriteria?.matchScore && typeof matchRecord.matchCriteria.matchScore === 'number' ? 
