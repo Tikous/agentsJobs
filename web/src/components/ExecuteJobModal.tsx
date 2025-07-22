@@ -67,23 +67,40 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
         const matchedAgents = matchDetails.agents || [matchDetails.agent].filter(Boolean);
         setAgents(matchedAgents);
         
-        // 如果job已完成，获取执行结果
-        if (job.status === 'Completed' || job.status === 'Failed') {
-          const result = await queueApi.getJobResult(job.id);
-          if (result.hasResult) {
-            // 将已有的执行结果存储到对应的agent中
-            // 注意：这里假设只有一个agent完成了执行
-            if (matchedAgents.length > 0) {
-              const resultMap = new Map();
-              resultMap.set(matchedAgents[0].id, result);
-              setAgentResults(resultMap);
-            }
+        // 从后端返回的agents数据中恢复已存储的执行结果
+        const resultMap = new Map();
+        matchedAgents.forEach(agent => {
+          if (agent.executionResult) {
+            // 将数据库中的执行结果转换为前端期望的格式
+            const frontendResult = {
+              jobId: job.id,
+              jobTitle: job.jobTitle,
+              status: agent.executionResult.status,
+              executionResult: agent.executionResult.result,
+              executedAt: agent.executionResult.executedAt,
+              executionError: agent.executionResult.error,
+              hasResult: agent.executionResult.status === 'Completed',
+              agentId: agent.id
+            };
+            resultMap.set(agent.id, frontendResult);
           }
-        } else if ((job.status === 'Matched' || job.status === 'In Progress') && !autoExecutionStarted) {
-          // 如果job状态是Matched或In Progress且还未开始自动执行，则开始自动执行
-          // 这样即使用户刷新页面，也能继续执行尚未完成的agents
-          setAutoExecutionStarted(true);
-          executeAllAgents(matchedAgents);
+        });
+        
+        // 始终恢复已存储的执行结果（不管job状态如何）
+        setAgentResults(resultMap);
+        
+        // 检查是否需要自动执行agents
+        if ((job.status === 'Matched' || job.status === 'In Progress') && !autoExecutionStarted) {
+          // 过滤掉已经有执行结果的agents，避免重复执行
+          const agentsToExecute = matchedAgents.filter(agent => !agent.executionResult);
+          
+          if (agentsToExecute.length > 0) {
+            setAutoExecutionStarted(true);
+            executeAllAgents(agentsToExecute);
+          } else {
+            // 所有agents都已经执行完成，只是标记已开始自动执行以防重复
+            setAutoExecutionStarted(true);
+          }
         }
       } catch (error) {
         console.error('获取job详情失败:', error);
@@ -97,7 +114,7 @@ const ExecuteJobModal: React.FC<ExecuteJobModalProps> = ({
     };
 
     fetchJobDetails();
-  }, [visible, job, agent, autoExecutionStarted]);
+  }, [visible, job, agent]);  // Remove autoExecutionStarted from dependencies to avoid infinite loop
 
   // 自动执行所有agents
   const executeAllAgents = async (agentsToExecute: Agent[]) => {

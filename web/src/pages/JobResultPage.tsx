@@ -147,22 +147,86 @@ const JobResultPage: React.FC = () => {
         </Card>
 
         {/* 执行结果 */}
-        {job.status === 'Completed' && job.executionResult && (
+        {job.executionResult && (
           <Card title="执行结果" style={{ marginBottom: '16px' }}>
-            <div style={{ 
-              background: '#fafafa', 
-              padding: '16px', 
-              borderRadius: '6px',
-              maxHeight: '600px',
-              overflow: 'auto'
-            }}>
-              <ReactMarkdown>
-                {typeof job.executionResult === 'string' 
-                  ? job.executionResult 
-                  : JSON.stringify(job.executionResult, null, 2)
+            {(() => {
+              // 检查executionResult是否是多agent结果的格式
+              if (typeof job.executionResult === 'object' && job.executionResult !== null) {
+                const agentResults = Object.values(job.executionResult);
+                
+                // 如果是多agent结果格式
+                if (agentResults.length > 0 && agentResults[0] && typeof agentResults[0] === 'object' && 'agentId' in agentResults[0]) {
+                  return (
+                    <div>
+                      {agentResults.map((agentResult: any, index: number) => (
+                        <Card 
+                          key={agentResult.agentId || index}
+                          size="small" 
+                          style={{ marginBottom: '12px' }}
+                          title={
+                            <Space>
+                              <Text strong>Agent: {agentResult.agentName || agentResult.agentId}</Text>
+                              <Tag color={agentResult.status === 'Completed' ? 'success' : 'error'}>
+                                {agentResult.status === 'Completed' ? '执行成功' : '执行失败'}
+                              </Tag>
+                              {agentResult.executedAt && (
+                                <Text type="secondary" style={{ fontSize: '12px' }}>
+                                  {new Date(agentResult.executedAt).toLocaleString()}
+                                </Text>
+                              )}
+                            </Space>
+                          }
+                        >
+                          {agentResult.error ? (
+                            <Alert
+                              message={agentResult.error}
+                              type="error"
+                              size="small"
+                              showIcon
+                            />
+                          ) : agentResult.result ? (
+                            <div style={{ 
+                              background: '#f5f5f5', 
+                              padding: '12px', 
+                              borderRadius: '6px',
+                              maxHeight: '300px',
+                              overflow: 'auto'
+                            }}>
+                              <ReactMarkdown>
+                                {typeof agentResult.result === 'string' 
+                                  ? agentResult.result 
+                                  : JSON.stringify(agentResult.result, null, 2)
+                                }
+                              </ReactMarkdown>
+                            </div>
+                          ) : (
+                            <Text type="secondary">暂无执行结果</Text>
+                          )}
+                        </Card>
+                      ))}
+                    </div>
+                  );
                 }
-              </ReactMarkdown>
-            </div>
+              }
+              
+              // 兼容旧格式的单一执行结果
+              return (
+                <div style={{ 
+                  background: '#fafafa', 
+                  padding: '16px', 
+                  borderRadius: '6px',
+                  maxHeight: '600px',
+                  overflow: 'auto'
+                }}>
+                  <ReactMarkdown>
+                    {typeof job.executionResult === 'string' 
+                      ? job.executionResult 
+                      : JSON.stringify(job.executionResult, null, 2)
+                    }
+                  </ReactMarkdown>
+                </div>
+              );
+            })()}
           </Card>
         )}
 

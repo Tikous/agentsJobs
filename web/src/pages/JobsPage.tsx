@@ -360,6 +360,21 @@ const JobsPage: React.FC = () => {
               执行
             </Button>
           )}
+          {record.status === 'In Progress' && (
+            <Button
+              type="primary"
+              size="small"
+              onClick={() => handleShowExecuteModal(record)}
+              style={{ 
+                padding: '0 8px', 
+                fontSize: '12px',
+                background: '#1890ff',
+                borderColor: '#1890ff'
+              }}
+            >
+              查看
+            </Button>
+          )}
           {record.status === 'Failed' && (
             <Popconfirm
               title="确定要重新匹配？"

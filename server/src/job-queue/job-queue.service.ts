@@ -84,15 +84,13 @@ export class JobQueueService {
   }
 
   /**
-   * 手动触发队列处理
+   * 手动触发队列处理（仅处理匹配，不自动执行）
    */
   async manualTrigger() {
     this.logger.log('手动触发队列处理');
     
-    await Promise.all([
-      this.processMatchingQueue(),
-      this.processExecutionQueue()
-    ]);
+    // 只处理匹配队列，不自动执行
+    await this.processMatchingQueue();
     
     return { message: '队列处理已触发' };
   }
